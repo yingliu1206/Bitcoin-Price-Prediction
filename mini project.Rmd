@@ -1,0 +1,342 @@
+---
+title: "mini project"
+author: "Ying Liu"
+date: "2021/4/1"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r}
+#data cleanup
+library(dplyr)
+library(tidyr)
+library(magrittr)
+library(stringr)
+library(lubridate)
+library(data.table)
+
+#Visualization
+library(plotly)
+library(ggplot2)
+library(DT)
+
+#Data
+library(bea.R)
+library(devtools)
+library(gtrendsR)
+
+#Text Analysis
+library(tidytext)
+library(wordcloud)
+library(RColorBrewer)
+
+#Forecasting
+library(quantmod)
+library(forecast)
+library(tseries)
+library(prophet)
+```
+
+### data cleaning
+```{r}
+# load the dataset
+library(tidyverse)
+stock = read.csv("BitcoinStockMarketHistoricalData_2014_2021.csv", stringsAsFactors=FALSE)
+
+stock$Date = as.Date(stock$Date, format =  "%m/%d/%Y")
+stock$Open = as.numeric(stock$Open)
+stock$High = as.numeric(stock$High)
+stock$Low = as.numeric(stock$Low)
+stock$Close = as.numeric(stock$Close)
+stock$Adj.Close = as.numeric(stock$Adj.Close)
+stock$Volume = as.numeric(stock$Volume)
+
+# remove missing values
+stock = na.omit(stock)
+sum(is.na(stock))
+head(stock,6)
+```
+
+### Visualization
+```{r}
+p1 <- stock %>%
+  plot_ly(x = ~Date,
+          type = "candlestick", 
+          open = ~Open, 
+          close = ~Close, 
+          high = ~High,
+          low = ~Low,
+          name = "price") %>%
+  layout(
+    xaxis = list(
+      rangeselector = list(
+        buttons = list(
+          list(
+            count = 1,
+            label = "1 mo",
+            step = "week",
+            stepmode = "backward"),
+          list(
+            count = 3,
+            label = "3 mo",
+            step = "month",
+            stepmode = "backward"),
+          list(
+            count = 6,
+            label = "6 mo",
+            step = "month",
+            stepmode = "backward"),
+          list(
+            count = 1,
+            label = "1 yr",
+            step = "year",
+            stepmode = "backward"),
+          list(
+            count = 3,
+            label = "3 yr",
+            step = "year",
+            stepmode = "backward"),
+          list(step = "all"))),
+      rangeslider = list(visible = FALSE)),
+         yaxis = list(title = "Price ($)",
+                      showgrid = TRUE,
+                      showticklabels = TRUE))
+p2 <- stock %>%
+  plot_ly(x=~Date, y=~Volume, type='bar', name = "Volume") %>%
+  layout(yaxis = list(title = "Volume"))
+
+p <- subplot(p1, p2, heights = c(0.7,0.3), nrows=2,
+             shareX = TRUE, titleY = TRUE) %>%
+  layout(title = "Bitcoin")
+p
+```
+
+### Initial Analysis
+```{r}
+bit_ts = stock %>%
+  filter(Date > as.Date('2017-01-01')) %>%
+  arrange(Date) %>%
+  select(Adj.Close) %>%
+  as.matrix() %>%
+  ts()
+
+my_theme = theme(panel.grid = element_line(color = '#e6e6e6'),
+                 panel.background = element_rect(fill = 'white'),
+                 plot.title = element_text(hjust = .5, size = 28, colour = '#ffa500'),
+                 text = element_text(family = 'Georgia'),
+                 axis.text = element_text(size = 10),
+                 axis.title = element_text(size = 18, family = 'Georgia', face = 'bold'),
+                 axis.line = element_line(colour = '#737373', size = 1),
+                 strip.background = element_rect(colour = "black", fill = "white"),
+                 strip.text = element_text(face = 'bold'))  
+
+gglagplot(bit_ts, do.lines = F) + my_theme +
+         scale_color_continuous(low = "#b37400", high = "#ffc04d", breaks = c(1, 366, 731, 1096, 1462), labels = c('2017', '2018', '2019','2020','2021')) + 
+  scale_y_continuous(breaks = c(0, 15000, 30000, 45000), 
+                     labels = c('$0', '$15,000', '$30,000', '$45,000')) +
+  scale_x_continuous(breaks = c(30000, 60000), 
+                     labels = c('$30,000', '$60,000'))
+```
+
+```{r}
+ggAcf(bit_ts, lag.max = 200) + my_theme + labs(title = 'ACF' , y = 'Correlation')
+
+ggPacf(bit_ts, lag.max = 200) + my_theme + labs(title = 'PACF', y = '')
+```
+
+```{r}
+ggAcf(diff(bit_ts), lag.max = 200) + my_theme + labs(title = 'ACF' , y = 'Correlation') 
+
+ggPacf(diff(bit_ts), lag.max = 200) + my_theme + labs(title = 'PACF', y = '')
+```
+
+### The First Difference
+
+```{r}
+cut_bit_df = stock %>%
+  filter(Date > as.Date('2017-01-01'))
+
+ggplotly(cut_bit_df[-1,] %>%
+  mutate(Price = diff(cut_bit_df$Adj.Close)) %>%
+  ggplot(aes(Date, Price)) + geom_line(col = '#ffa500') + my_theme + 
+  labs(x = '', title = 'Bitcoin Differenced By One', y = 'Difference'))
+```
+
+### transformation
+
+```{r}
+BoxCox.lambda(bit_ts)
+
+# before transformation
+ggplotly(stock %>%
+           filter(Date >= as.Date('2017-01-01')) %>% ggplot(aes(Date, Adj.Close)) + geom_line(col = '#ffa500') + 
+  labs(title = 'Bitcoin', x = '') +
+  scale_y_continuous(breaks = c(0, 10000, 20000, 30000, 40000, 50000, 60000), 
+                     labels = c('$0', '$10,000', '$20,000', '$30,000', '$40,000', '$50,000', '$60,000')) + my_theme)
+
+# after transformation
+ggplotly(stock %>%
+           mutate(Price = BoxCox(stock$Adj.Close, lambda = BoxCox.lambda(stock$Adj.Close))) %>%
+           ggplot(aes(Date, Adj.Close)) + geom_line(col = '#ffa500') + 
+  labs(title = 'Bitcoin', x = '', y = 'Price (Transformed)') + my_theme)
+```
+
+### Model Fitting
+
+```{r}
+bit_ts_tran = BoxCox(bit_ts, lambda = BoxCox.lambda(bit_ts))
+
+ggAcf(diff(bit_ts_tran), lag.max = 200) + my_theme + labs(title = 'ACF' , y = 'Correlation') 
+
+ggPacf(diff(bit_ts_tran), lag.max = 200) + my_theme + labs(title = 'PACF', y = '')
+
+auto.arima(bit_ts_tran)
+checkresiduals(auto.arima(bit_ts_tran))
+```
+
+### model again
+```{r}
+cut2_bit_df = stock %>%
+           filter(Date >= ymd('2019-01-01'))
+
+ggplotly(cut2_bit_df %>%
+           mutate(Price = BoxCox(cut2_bit_df$Adj.Close, lambda = BoxCox.lambda(cut2_bit_df$Adj.Close))) %>%
+           ggplot(aes(Date,Adj.Close)) + geom_line(col = '#ffa500') + 
+  labs(title = 'Bitcoin', x = '', y = 'Price (Transformed)') + my_theme)
+
+bit_ts2 = stock %>%
+  filter(Date >= as.Date('2019-01-01')) %>%
+  arrange(Date) %>%
+  select(Adj.Close) %>%
+  as.matrix() %>%
+  ts()
+
+bit_ts_tran2 = BoxCox(bit_ts2, lambda = BoxCox.lambda(bit_ts2))
+
+ggAcf(bit_ts_tran2, lag.max = 200) + my_theme + labs(title = 'ACF' , y = 'Correlation') 
+
+ggPacf(bit_ts_tran2, lag.max = 200) + my_theme + labs(title = 'PACF', y = '')
+
+auto.arima(bit_ts_tran2)
+checkresiduals(auto.arima(bit_ts_tran2))
+autoplot(forecast(auto.arima(bit_ts_tran2)))
+```
+
+```{r}
+cut2_bit_df = stock %>%
+           filter(Date >= ymd('2018-01-01') & Date <= ymd('2019-01-01')) 
+
+ggplotly(cut2_bit_df %>%
+           mutate(Price = BoxCox(cut2_bit_df$Adj.Close, lambda = BoxCox.lambda(cut2_bit_df$Adj.Close))) %>%
+           ggplot(aes(Date,Adj.Close)) + geom_line(col = '#ffa500') + 
+  labs(title = 'Bitcoin', x = '', y = 'Price (Transformed)') + my_theme)
+
+bit_ts2 = stock %>%
+  filter(Date >= as.Date('2018-01-01') & Date <= as.Date('2019-01-01')) %>%
+  arrange(Date) %>%
+  select(Adj.Close) %>%
+  as.matrix() %>%
+  ts()
+
+bit_ts_tran2 = BoxCox(bit_ts2, lambda = BoxCox.lambda(bit_ts2))
+
+ggAcf(bit_ts_tran2, lag.max = 200) + my_theme + labs(title = 'ACF' , y = 'Correlation') 
+
+ggPacf(bit_ts_tran2, lag.max = 200) + my_theme + labs(title = 'PACF', y = '')
+
+auto.arima(bit_ts_tran2)
+checkresiduals(auto.arima(bit_ts_tran2))
+```
+
+```{r}
+summary(Arima(bit_ts_tran2, order = c(1,1,1), include.drift = T))
+err = residuals(Arima(bit_ts_tran2, order = c(1,1,1), include.drift = T))
+invers_BoxCox = function(ts_data, lambda){
+  original_ts = (ts_data * lambda + 1) ** (1/lambda)
+  return(original_ts)
+}
+
+invers_BoxCox(sd(err), BoxCox.lambda(bit_ts))
+```
+
+### text data
+```{r}
+# load the dataset
+news = read.csv("BitcoinNews_2021_1.csv", fileEncoding = "UTF-8", stringsAsFactors=FALSE)
+news$Date = as.Date(news$Date, format =  "%m/%d/%Y")
+head(news,6)
+news_text = news$Headline
+
+# cleaning
+library(tm)
+news_source = Corpus(VectorSource(as.vector(news_text))) 
+news_corpus = tm_map(news_source, tolower)  #transfer to lowercase
+news_corpus = tm_map(news_corpus, removeNumbers) # remove numbers
+news_corpus = tm_map(news_corpus, removePunctuation) # remove punctuation 
+news_corpus = tm_map(news_corpus, stripWhitespace) # strip white spaces
+news_corpus = tm_map(news_corpus, stemDocument, language = "english") # remove common word endings
+news_corpus = tm_map(news_corpus, removeWords, stopwords("english")) # remove useless words
+```
+
+### News Sentiment Analysis
+```{r}
+news_words <- news %>%
+  select(c("Date","Source", "Title", "Headline")) %>%
+  unnest_tokens(word, Headline) %>%
+  filter(!word %in% append(stop_words$word, values = "chars"), str_detect(word, "^[a-z']+$"))
+news_words$date = news_words$Date
+
+words_only <- news_words %>%
+  count(word, sort =TRUE)
+
+set.seed(1)
+wordcloud(words = words_only$word, freq = words_only$n, scale=c(5,.5), max.words=50, colors=brewer.pal(8, "Dark2"))
+```
+
+### wordcloud
+```{r}
+## Build a term-document matrix
+news_dtm =DocumentTermMatrix(news_corpus)
+news_dtm = as.matrix(news_dtm)
+
+## Print out the top 10 most frequent words
+WordFreq = colSums(news_dtm)
+ord = order(WordFreq)
+WordFreq[tail(ord,10)]
+
+## Print out the number of words in each document
+Row_Sum_Per_doc = rowSums(news_dtm)
+print (Row_Sum_Per_doc)
+
+#wordcloud 
+library(wordcloud) 
+v = sort(colSums(news_dtm),decreasing=TRUE) # get word frequency in Hamilton files
+d = data.frame(word = names(v),freq=v) # create a data frame 
+write.csv(d, file="words.csv")
+head(d,10)
+set.seed(1234)
+wordcloud(words = d$word, freq = d$freq, min.freq = 5,
+          max.words=200, random.order=FALSE, rot.per=0.35,
+          colors=brewer.pal(8, "Dark2"))
+```
+
+### News Sentiment over Time
+```{r}
+library(textdata)
+afinn <- get_sentiments("afinn")
+
+sentiment_summary <- news_words %>%
+  left_join(afinn) %>%
+  filter(!is.na(value)) %>%
+  group_by(Title, Date) %>%
+  summarise(score = mean(value)) %>%
+  mutate(sentiment = ifelse(score>0, "positive","negative")) 
+
+datatable(sentiment_summary)
+
+# plot
+ggplot(sentiment_summary, aes(Date, score)) + 
+  geom_bar(stat = "identity", aes(fill=sentiment))  + 
+  ggtitle("Bitcoin: News Sentiment Over Time")
+```

@@ -1,0 +1,145 @@
+---
+title: "cleaning"
+author: "Ying Liu"
+date: "2021/3/30"
+output: html_document
+---
+
+data cleaning
+```{r}
+# load the dataset
+library(tidyverse)
+stock = read.csv("BitcoinStockMarketHistoricalData_2014_2021.csv", stringsAsFactors=FALSE)
+
+stock$Date = as.Date(stock$Date, format =  "%m/%d/%Y")
+stock$Open = as.numeric(stock$Open)
+stock$High = as.numeric(stock$High)
+stock$Low = as.numeric(stock$Low)
+stock$Close = as.numeric(stock$Close)
+stock$Adj.Close = as.numeric(stock$Adj.Close)
+stock$Volume = as.numeric(stock$Volume)
+
+# remove missing values
+stock = na.omit(stock)
+sum(is.na(stock))
+head(stock,6)
+```
+
+data exloring
+```{r}
+library(quantmod)
+library(tsbox)
+stock.ts = ts_ts(ts_long(stock))
+summary(stock.ts)
+
+stock.xts = xts(x = stock.ts, order.by = stock$Date)
+?xts()
+chartSeries(stock.ts, subset = 'last 12 months', type = 1)
+addBBands()
+
+chartSeries(MSFT, subset = 'last 12 months', type = 1)
+```
+
+EDA
+```{r}
+# find outliers
+x <- stock$Open
+y <- stock$High
+# Plot with main and axis titles
+# Add regression line
+plot(x, y, main = "opening price and high price",
+     xlab = "open", ylab = "high",
+     pch = 19, frame = FALSE)
+abline(lm(y ~ x, data = mtcars), col = "blue")
+
+# find outliers
+x <- stock$Low
+y <- stock$Close
+# Plot with main and axis titles
+# Add regression line
+plot(x, y, main = "low price and closing price",
+     xlab = "low", ylab = "close",
+     pch = 19, frame = FALSE)
+abline(lm(y ~ x, data = mtcars), col = "blue")
+
+# find outliers
+x <- stock$Adj.Close
+y <- stock$Volume
+# Plot with main and axis titles
+# Add regression line
+plot(x, y, main = "Adj.Close price and volume",
+     xlab = "Adj.Close price", ylab = "volume",
+     pch = 19, frame = FALSE)
+abline(lm(y ~ x, data = mtcars), col = "blue")
+
+which(stock$Volume > 300000000000)
+```
+
+text data
+```{r}
+# load the dataset
+news = read.csv("BitcoinNews_2021_1.csv", fileEncoding = "UTF-8", stringsAsFactors=FALSE)
+news$Date = as.Date(news$Date, format =  "%m/%d/%Y")
+head(news,6)
+news_text = news$Headline
+
+# cleaning
+library(tm)
+news_source = Corpus(VectorSource(as.vector(news_text))) 
+news_corpus = tm_map(news_source, tolower)  #transfer to lowercase
+news_corpus = tm_map(news_corpus, removeNumbers) # remove numbers
+news_corpus = tm_map(news_corpus, removePunctuation) # remove punctuation 
+news_corpus = tm_map(news_corpus, stripWhitespace) # strip white spaces
+news_corpus = tm_map(news_corpus, stemDocument, language = "english") # remove common word endings
+news_corpus = tm_map(news_corpus, removeWords, stopwords("english")) # remove useless words
+```
+
+EDA
+```{r}
+## Build a term-document matrix
+news_dtm =DocumentTermMatrix(news_corpus)
+news_dtm = as.matrix(news_dtm)
+
+## Print out the top 10 most frequent words
+WordFreq = colSums(news_dtm)
+ord = order(WordFreq)
+WordFreq[tail(ord,10)]
+
+## Print out the number of words in each document
+Row_Sum_Per_doc = rowSums(news_dtm)
+print (Row_Sum_Per_doc)
+
+#wordcloud 
+library(wordcloud) 
+v = sort(colSums(news_dtm),decreasing=TRUE) # get word frequency in Hamilton files
+d = data.frame(word = names(v),freq=v) # create a data frame 
+write.csv(d, file="words.csv")
+head(d,10)
+set.seed(1234)
+wordcloud(words = d$word, freq = d$freq, min.freq = 5,
+          max.words=200, random.order=FALSE, rot.per=0.35,
+          colors=brewer.pal(8, "Dark2"))
+```
+
+analysis
+```{r}
+lm.fit = lm(Volume~., data= stock)
+summary(lm.fit)
+ggplot(stock, aes(date, Adj.Close)) +
+  geom_point() +
+  stat_smooth(method = lm, formula = y ~ poly(x, 4, raw = TRUE), aes(col = "4df"))+
+  stat_smooth(method = lm, formula = y ~ poly(x, 8, raw = TRUE), aes(col = "8df"))+
+  stat_smooth(method = lm, formula = y ~ poly(x, 12, raw = TRUE), aes(col = "12df"))+
+  scale_color_manual(values = c("red", "orange", "blue")) +
+  theme(legend.position = "right", legend.title = element_blank())
+```
+
+```{r}
+stock.df = data.frame(Volume=as.matrix(stock[,4]), date=time(EuStockMarkets))
+Eu.df=na.omit(Eu.df)
+head(Eu.df)
+
+model.1 = lm(Volume ~ poly(date, 4, raw = TRUE), data = stock)
+model.2 = lm(Volume ~ poly(date, 8, raw = TRUE), data = stock)
+model.3 = lm(Volume ~ poly(date, 12, raw = TRUE), data = stock)
+```
